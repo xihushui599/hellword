@@ -1,2 +1,0 @@
-# hellword
-sf
