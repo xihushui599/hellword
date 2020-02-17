@@ -19,6 +19,27 @@ def play_once(env,policy):
             break
         state=next_state
     return total_reward
-optimal_policy=np.ones((48,4),dtype=int)/4
+optimal_policy=np.ones((48,4),dtype=int)/4#等概率的策略
 total_reward=play_once(env,optimal_policy)
 print('总奖励={}'.format(total_reward))
+
+def evaluate_bellman(env,policy,gamma=1):
+    a,b = np.eye(env.nS),np.zeros((env.nS))
+    for state in range(env.nS-1):
+        for action in range(env.nA):
+            pi = policy[state][action]
+            for p,next_state,reward,done in env.P[state][action]:#系统的一个反馈
+                a[state,next_state]-=(pi*gamma)
+                b[state]+=(pi*reward*p)
+    v = np.linalg.solve(a,b.reshape(-1,1))
+    q = np.zeros((env.nS,env.nA))
+    for state in range(env.nS-1):
+        for action in range(env.nA):
+            for p,next_state,reward,done in env.P[state][action]:#系统的一个反馈
+                q[state,action]+=(p*(reward+gamma*v[next_state]))   
+    return v,q
+policy = np.random.uniform(size=(env.nS,env.nA))
+policy = policy / np.sum(policy,axis=1)[:,np.newaxis]
+state_valies,action_values = evaluate_bellman(env,policy)
+print('状态价值={}'.format(state_valies))
+print('动作价值={}'.format(action_values))
