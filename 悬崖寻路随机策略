@@ -1,0 +1,24 @@
+import gym
+import numpy as np
+env=gym.make('CliffWalking-v0')
+print('观察空间={}'.format(env.observation_space))
+print('动作空间={}'.format(env.action_space))
+print('状态数量={},动作数量={}'.format(env.nS,env.nA))
+print('地图大小={}'.format(env.shape))#shape就是求解数组的维数
+def play_once(env,policy):
+    total_reward=0
+    state=env.reset()#初始状态36
+    loc = np.unravel_index(state,env.shape)#索引state在数组中的位置
+    print('状态={},位置={}'.format(state,loc))#初始位置（3，0）
+    while True:
+        action=np.random.choice(env.nA,p=policy[state])#按照指定的概率分布选择一个动作,动作合集（0，1，2，3），p是一个列表
+        next_state,reward,done ,_ = env.step(action)
+        print('状态={}，位置={}，奖励={}'.format(next_state,loc,reward))
+        total_reward+=reward
+        if done:
+            break
+        state=next_state
+    return total_reward
+optimal_policy=np.ones((48,4),dtype=int)/4
+total_reward=play_once(env,optimal_policy)
+print('总奖励={}'.format(total_reward))
