@@ -1,0 +1,194 @@
+import gym
+import numpy as np
+import matplotlib.pyplot as plt
+env=gym.make("Blackjack-v0")
+#observation=env.reset()
+#print('观测={}'.format(observation))
+#while True:
+#    print('玩家={}，庄家={}'.format(env.player,env.dealer))
+#    action=np.random.choice(env.action_space.n)
+#    print('动作={}'.format(action))
+#    observation,reward,done,_=env.step(action)
+#    print('观察={}，奖励={}，结束指示={}'.format(observation,reward,done))
+#    if done:
+#        break
+def ob2state(observation):
+    return (observation[0],observation[1],int(observation[2]))#转化成一个元组，第一个参数为玩家得总数，第二个为庄家得第一个牌
+#第三个参数为玩家手上是否有A。
+
+#%% 同策会和更新策略
+def evaluate_action_monte_carlo(env,policy,episode_num=5000):#模拟5000次
+    q=np.zeros_like(policy)#policy是一个4维数组，第一维为玩家的总数，第二维是庄家的第一个牌，第三维是玩家手上是否有A，第四维决定是否要牌
+    c=np.zeros_like(policy)
+    for _ in range(episode_num):
+        state_actions=[]
+        observation=env.reset()#生成初始状态
+        while True:
+            state=ob2state(observation)#状态压缩成元组
+            action=np.random.choice(env.action_space.n,p=policy[state])#随机选择一个动作
+            state_actions.append((state,action))#元组为状态-动作对，添加到列表元组中。
+            observation,reward,done,_= env.step(action)
+            if done:
+                break
+        g=reward
+        for state,action in state_actions:
+            c[state][action]+=1.0
+            q[state][action]+=(g-q[state][action])/c[state][action]#形成状态动作的价值函数
+    return q
+policy=np.zeros((22,11,2,2))#随机策略
+policy[20:,:,:,0]=1#牌面数大于20选择不要牌，即不要牌的0状态设为1
+policy[:20,:,:,1]=1#牌面数小于20选择要牌，即要牌的状态设为1
+q=evaluate_action_monte_carlo(env,policy)
+v=(q*policy).sum(axis=-1)#三维数据，列代表的是0：没有a，1：有a.-1代表的是行之和，是每个元素对应相乘，不是矩阵相乘。
+
+def plot(data):
+    fig,axes=plt.subplots(1,2,figsize=(9,4))
+    titles=['without ace','aith ace']
+    have_aces=[0,1]
+    extent=[12,22,1,11]
+    for title,have_ace,axis in zip(titles,have_aces,axes):
+        dat=data[extent[0]:extent[1],extent[2]:extent[3],have_ace].T#22和11实际上索引只是到21和10，通过：全部调用索引，列的数目为11了，列的数目自动整合，不能为1列
+        axis.imshow(dat,extent=extent,origin='lower')   #热点图，
+        axis.set_xlabel('player sum')
+        axis.set_ylabel('dealer showing')
+        axis.set_title(title)
+    plt.show()
+#%% 带起始探索的同策略回合更新
+def monte_carlo_with_exploring_start(env,episode_num=50000):
+    policy=np.zeros((22,11,2,2))
+    policy[:,:,:,1]=1.0#要牌的概率为1
+    q=np.zeros_like(policy)
+    c=np.zeros_like(policy)
+    for _ in range(episode_num):#开始蒙特卡罗多次模拟迭代
+        state=(np.random.randint(12,22),np.random.randint(1,11),np.random.randint(2))#初始状态生成一个元组
+        action=np.random.randint(2)#初始化一个动作，是0：不要牌，还是1：要牌
+        env.reset()
+        if state[2]:#有A，元组的引用
+            env.player=[1,state[0]-11]
+        else:
+            if state[0]==21:
+                env.player=[10,9,2]
+            else:
+                env.player=[10,state[0]-10]
+        env.dealer[0]=state[1]
+        state_actions=[]
+        while True:
+            state_actions.append((state,action))
+            observation,reward,done,_=env.step(action)
+            if done:
+                break#回合结束
+            state=ob2state(observation)#状态是一个数组
+            action=np.random.choice(env.action_space.n,p=policy[state])#初始第一次的时候选择要牌，其他按概率
+        g=reward
+        for state,action in state_actions:
+            c[state][action]+=1.0
+            q[state][action]+=(g-q[state][action])/c[state][action]
+            a=q[state].argmax()#这个功能太有用了，可以求解使动作价值函数最大的动作。
+            policy[state]=0.0
+            policy[state][a]=1.0#贪婪算法，最优的动作策略被选的概率最大为1
+    return policy,q
+policy,q=monte_carlo_with_exploring_start(env)
+v=q.max(axis=-1)#每一行最大的动作价值，就为该状态的最大状态价值
+#plot(policy.argmax(-1))#policy.argmax(-1)每一行最大的策略，然后退化成一个（28×11）×2的矩阵，列代表有A和无A
+#plot(v)
+
+#%% 柔性策略同策回合更新
+def monte_carlo_with_soft(env,episode_num=50000,epsilon=0.1):
+    policy=np.ones((22,11,2,2))*0.5
+    q=np.zeros_like(policy)
+    c=np.zeros_like(policy)
+    for _ in range(episode_num):
+        state_actions=[]
+        observation=env.reset()
+        while True:
+            state=ob2state(observation)
+            action=np.random.choice(env.action_space.n,p=policy[state])
+            state_actions.append((state,action))#一个回合可能有多次统计
+            observation,reward,done,_=env.step(action)
+            if done:
+                break
+        g=reward
+        for state,action in state_actions:
+            c[state][action]+=1.0
+            q[state][action]+=(g-q[state][action])/c[state][action]
+            a=q[state].argmax()
+            policy[state]=epsilon/2.0
+            policy[state][a]+=(1.0-epsilon)
+    return policy,q
+policy,q=monte_carlo_with_soft(env)
+v=q.max(axis=-1)
+#plot(policy.argmax(-1))#某一个状态的最优策略，-1是按照行
+#plot(v)
+
+#%% 异策回和更新
+def evaluate_monte_carlo_importance_resample(env,policy,behavior_policy,episode_num=5000):
+    q=np.zeros_like(policy)
+    c=np.zeros_like(policy)
+    for _ in range(episode_num):
+        state_actions=[]
+        observation=env.reset()
+        while True:
+            state=ob2state(observation)
+            action=np.random.choice(env.action_space.n,p=behavior_policy[state])
+            state_actions.append((state,action))
+            observation,reward,done,_=env.step(action)
+            if done:
+                break
+        g=reward
+        rho=1#重要性采样比率
+        for state,action in reversed(state_actions):#为啥要reversed?,采用的是逆序更新，这一点太重要了。
+            c[state][action]+=rho#每一个状态都要更新重要性采样的比率
+            q[state][action]+=(rho/c[state][action]*(g-q[state][action]))
+            rho*=(policy[state][action])
+            if rho==0:
+                break
+    return q
+policy = np.zeros((22,11,2,2))
+policy[20:,:,:,0]=1#>20不要牌
+policy[:20,:,:,1]=1#<20继续要牌
+behavior_policy=np.ones_like(policy)*0.5
+q=evaluate_monte_carlo_importance_resample(env,policy,behavior_policy)
+v=(q*policy).sum(axis=-1)#每一行也就是所有动作之和，最后还是两列这一点需要特别注意
+#plot(v)
+
+#%% 异侧最优策略求解
+def monte_carlo_importance_resample(env,episode_num=5000):
+    policy=np.zeros((22,11,2,2))
+    policy[:,:,:,0]=1.0#不要牌的概率为1
+    behavior_policy = np.ones_like(policy)*0.5
+    q = np.zeros_like(policy)
+    c = np.zeros_like(policy)
+    for _ in range(episode_num):
+        state_actions=[]
+        observation = env.reset()
+        while True:
+            state = ob2state(observation)
+            action = np.random.choice(env.action_space.n,p=behavior_policy[state])
+            state_actions.append((state,action))
+            observation,reward,done,_ = env.step(action)
+            if done:
+                break
+        g = reward
+        rho = 1
+        for state,action in reversed(state_actions):
+            c[state][action]+=rho
+            q[state][action]+=(rho/c[state][action]*(g-q[state][action]))
+            a=q[state].argmax()
+            policy[state]=0
+            policy[state][a]=1.0
+            if a!=action:#采用逆向更新，以但不满足，就跳出该回合，后面也就是之前的状态价值函数不再执行更新，重要性采样定理这个方法还是比较奇怪的
+                break
+            rho/=behavior_policy[state][action]
+    return policy,q
+policy,q = monte_carlo_importance_resample(env)
+v=q.max(axis=-1)
+plot(policy.argmax(-1))
+plot(v)
+
+
+
+
+
+
+
+
